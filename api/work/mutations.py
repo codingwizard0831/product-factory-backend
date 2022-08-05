@@ -447,7 +447,7 @@ class CreateChallengeMutation(graphene.Mutation, InfoType):
                 challenge_bounty.expertise.add(Expertise.objects.get(id=expertise['id']))
 
 
-        return CreateChallengeMutation(challenge=challenge, status=True, message="Task has been created successfully")
+        return CreateChallengeMutation(challenge=challenge, status=True, message="Challenge has been created successfully")
 
 
 class UpdateChallengeMutation(graphene.Mutation, InfoType):
@@ -601,7 +601,6 @@ class UpdateChallengeMutation(graphene.Mutation, InfoType):
                 challenge.status = Challenge.CHALLENGE_STATUS_AVAILABLE
                 challenge.save()
 
-
             return UpdateChallengeMutation(challenge=None, status=True, message="Challenge has been updated successfully")
         except Exception as ex:
             print(ex)
@@ -613,7 +612,7 @@ class DeleteChallengeMutation(graphene.Mutation):
         id = graphene.Int(required=True)
 
     status = graphene.Boolean()
-    task_id = graphene.Int()
+    challenge_id = graphene.Int()
 
     @staticmethod
     def mutate(root, info, id, input=None):
@@ -622,7 +621,7 @@ class DeleteChallengeMutation(graphene.Mutation):
             challenge = Challenge.objects.get(pk=id)
             challenge.delete()
             status = True
-            return DeleteChallengeMutation(status=status, task_id=id)
+            return DeleteChallengeMutation(status=status, challenge_id=id)
         except:
             pass
         return DeleteChallengeMutation(status=status)

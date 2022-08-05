@@ -43,7 +43,7 @@ def get_tasks(task_model, info, kwargs):
     return gql_optimizer.query(task_model.get_filtered_data(input_data, exclude_data=exclude_data), info)
 
 
-def get_tasks_by_product(task_model, info, kwargs, only_count=False):
+def get_tasks_by_product(challenge_model, info, kwargs, only_count=False):
     try:
         review_id = kwargs.get('review_id')
         input_data = kwargs.get('input')
@@ -58,20 +58,20 @@ def get_tasks_by_product(task_model, info, kwargs, only_count=False):
         else:
             product_id = Product.objects.get(slug=kwargs.get('product_slug')).id
 
-        product_param_name = "producttask__product" \
-            if task_model.__name__ == Challenge.__name__ else "product_id"
+        product_param_name = "productchallenge__product" \
+            if challenge_model.__name__ == Challenge.__name__ else "product_id"
 
         filter_data = {
             product_param_name: product_id,
             "blocked": False
         }
 
-        task_queryset = task_model.get_filtered_data(input_data, filter_data, exclude_data)
+        challenge_queryset = challenge_model.get_filtered_data(input_data, filter_data, exclude_data)
 
         if only_count:
-            return task_queryset.count()
+            return challenge_queryset.count()
 
-        return gql_optimizer.query(task_queryset, info)
+        return gql_optimizer.query(challenge_queryset, info)
     except Product.DoesNotExist:
         return None
 

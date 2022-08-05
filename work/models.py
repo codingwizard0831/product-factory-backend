@@ -359,8 +359,8 @@ class Challenge(TimeStampMixin, UUIDMixin):
             filter_data["created_by__in"] = task_creator
 
         if assignee:
-            filter_data["taskclaim__kind__in"] = [0, 1]
-            filter_data["taskclaim__person_id__in"] = assignee
+            filter_data["bountyclaim__kind__in"] = [0, 1]
+            filter_data["bountyclaim__person_id__in"] = assignee
 
         if skills:
             filter_data["skill__parent__in"] = skills
@@ -575,7 +575,7 @@ class ChallengeListing(models.Model):
         tags = input_data.get("tags", [])
         priority = input_data.get("priority", [])
         assignee = input_data.get("assignee", [])
-        categories = input_data.get("categories", [])
+        skills = input_data.get("skills", [])
         task_creator = input_data.get("task_creator", [])
 
         if statuses:
@@ -587,14 +587,14 @@ class ChallengeListing(models.Model):
         if tags:
             filter_data["tags__contains"] = tags
 
-        if categories:
-            filter_data["task__category__parent__in"] = categories
+        if skills:
+            filter_data["challenge__skill__parent__in"] = skills
 
         if priority:
             filter_data["priority__in"] = priority
 
         if task_creator:
-            filter_data["task_creator_id__in"] = task_creator
+            filter_data["challenge_creator_id__in"] = task_creator
 
         if assignee:
             filter_data["assigned_to_person_id__in"] = assignee
