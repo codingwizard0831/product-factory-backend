@@ -851,6 +851,8 @@ class ClaimBountyMutation(InfoStatusMutation, graphene.Mutation):
     message = graphene.String()
     claimed_task_link = graphene.String()
     claimed_task_name = graphene.String()
+    claimed_bounty_product_name = graphene.String()
+    claimed_bounty_product_link = graphene.String()
 
     @staticmethod
     def get_is_need_agreement(user_id, challenge_id):
@@ -903,6 +905,8 @@ class ClaimBountyMutation(InfoStatusMutation, graphene.Mutation):
             claimed_bounty = current_person.bountyclaim_set.filter(kind=CLAIM_TYPE_ACTIVE).last()
             if claimed_bounty:
                 claimed_challenge = claimed_bounty.bounty.challenge
+
+                print(claimed_challenge.product, claimed_challenge.product.name)
                 return ClaimBountyMutation(
                     success=False,
                     is_need_agreement=False,
@@ -911,7 +915,10 @@ class ClaimBountyMutation(InfoStatusMutation, graphene.Mutation):
                         Please complete current bounty first to claim a new bounty.
                     """,
                     claimed_task_link=claimed_challenge.get_challenge_link(False),
-                    claimed_task_name=claimed_challenge.title
+                    claimed_task_name=claimed_challenge.title,
+                    claimed_bounty_product_name=claimed_challenge.product.name,
+                    claimed_bounty_product_link="/%s/%s"%(claimed_challenge.product.owner.person.slug, 
+                                                            claimed_challenge.product.slug)
                 )
 
             # create a new bounty claim with "Active" status if task has "auto_approve_task_claims" value
