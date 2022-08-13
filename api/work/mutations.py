@@ -804,38 +804,37 @@ class InReviewTaskMutation(InfoStatusMutation, graphene.Mutation):
 
     @staticmethod
     @is_current_person
-    def mutate(current_person, info, *args, task_id, delivery_message, file_list):
+    def mutate(current_person, info, *args, bounty_id, delivery_message, file_list):
         try:
-            task = Challenge.objects.get(id=task_id)
+            bounty = Bounty.objects.get(id=bounty_id)
+            bounty_claim = bounty.bountyclaim_set.filter(person=current_person, kind=CLAIM_TYPE_ACTIVE, bounty=bounty).last()
 
-            task_claim = task.taskclaim_set.filter(person=current_person, kind=CLAIM_TYPE_ACTIVE, task=task).last()
-            if not task_claim:
-                return InReviewTaskMutation(success=False, message="The task claim was not found")
+            if not bounty_claim:
+                return InReviewTaskMutation(success=False, message="No bounty claim was found")
 
-            task_delivery_attempt = TaskDeliveryAttempt.objects.create(kind=0, person=current_person,
-                                                                       task_claim=task_claim,
-                                                                       delivery_message=delivery_message)
+            bounty_delivery_attempt = BountyDeliveryAttempt.objects.create(kind=BountyDeliveryAttempt.REQUEST_TYPE_NEW, 
+                                                                            person=current_person,
+                                                                            bounty_claim=bounty_claim,
+                                                                            delivery_message=delivery_message)
             attachments = []
             for i in file_list:
-                attachments.append(TaskDeliveryAttachment.objects.create(**upload_file(i, 'review'),
-                                                                         task_delivery_attempt=task_delivery_attempt))
+                attachments.append(BountyDeliveryAttachment.objects.create(**upload_file(i, 'review'),
+                                                                         bounty_delivery_attempt=bounty_delivery_attempt))
 
-            task_claim.kind = CLAIM_TYPE_IN_REVIEW
-            task_claim.save()
-            if task.reviewer:
+            bounty_claim.kind = CLAIM_TYPE_IN_REVIEW
+            bounty_claim.save()
+            if bounty.reviewer:
                 notification.tasks.send_notification.delay([Notification.Type.EMAIL],
                                                            Notification.EventType.TASK_IN_REVIEW,
-                                                           receivers=[task.reviewer.id],
-                                                           title=task.title,
-                                                           link=task.get_challenge_link())
+                                                           receivers=[bounty.reviewer.id],
+                                                           title=bounty.title,
+                                                           link=bounty.get_challenge_link())
 
             # call task save event to update tasklisting model
-            task.status = Task.TASK_STATUS_IN_REVIEW
-            task.save()
-            task_from_list = TaskListing.objects.get(task_id=task.id)
-            task_from_list.status = Task.TASK_STATUS_IN_REVIEW
-            task.updated_at = datetime.now()
-            task.save()
+            bounty.status = Bounty.BOUNTY_STATUS_IN_REVIEW
+            bounty.save()
+            # task_from_list = TaskListing.objects.get(task_id=bounty.id)
+            # task_from_list.status = Task.TASK_STATUS_IN_REVIEW
 
             return InReviewTaskMutation(success=True, message='The task status was changed to "In review"')
         except Challenge.DoesNotExist:

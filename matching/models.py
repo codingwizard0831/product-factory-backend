@@ -56,11 +56,16 @@ def save_bounty_claim(sender, instance, created, **kwargs):
 
 
 class BountyDeliveryAttempt(TimeStampMixin):
+    REQUEST_TYPE_NEW = 0
+    REQUEST_TYPE_APPROVED = 1
+    REQUEST_TYPE_REJECTED = 2
+
     CLAIM_REQUEST_TYPE = (
-        (0, "New"),
-        (1, "Approved"),
-        (2, "Rejected"),
+        (REQUEST_TYPE_NEW, "New"),
+        (REQUEST_TYPE_APPROVED, "Approved"),
+        (REQUEST_TYPE_REJECTED, "Rejected"),
     )
+    
     kind = models.IntegerField(choices=CLAIM_REQUEST_TYPE, default=0)
     bounty_claim = models.ForeignKey(BountyClaim, on_delete=models.CASCADE, blank=True, null=True,
                                    related_name="delivery_attempt")
