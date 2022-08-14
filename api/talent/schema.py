@@ -2,7 +2,7 @@ from django.db.models import Count, Q
 
 from matching.models import BountyClaim, CLAIM_TYPE_DONE
 from .types import *
-from work.models import CodeRepository
+from work.models import Bounty, CodeRepository
 from api.work.types import CodeRepositoryType
 from .mutations import CreatePersonMutation, SignInPersonMutation, AvatarUploadMutation, UpdatePersonMutation, \
     AvatarDeleteMutation
@@ -97,12 +97,18 @@ class PersonQuery(ObjectType):
 
     @staticmethod
     def resolve_person_task_delivery_message(info, *args, **kwargs):
-        bounty_id = kwargs.get('task_id')
+        challenge_id = kwargs.get('task_id')
         person_slug = kwargs.get('person_slug')
-        if bounty_id and person_slug:
-            bounty_claim = BountyClaim.objects.filter(bounty_id=bounty_id, kind=CLAIM_TYPE_DONE,
+        challenge_bounty = Bounty.objects.filter(challenge_id=challenge_id)
+        bounty_claim = None
+        for bounty in challenge_bounty:
+            bounty_claim = BountyClaim.objects.filter(bounty=bounty, kind=CLAIM_TYPE_DONE,
                                                   person__slug=person_slug).last()
-            return bounty_claim.delivery_messages.filter(kind=CLAIM_TYPE_DONE).last()
+            if bounty_claim:
+                delivery_attempt = bounty_claim.delivery_attempt.filter(kind=BountyDeliveryAttempt.REQUEST_TYPE_APPROVED).last()
+                if delivery_attempt:
+                    return delivery_attempt
+
         return
 
 
