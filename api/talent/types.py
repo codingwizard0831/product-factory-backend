@@ -148,13 +148,16 @@ class PersonPortfolioType(DjangoObjectType):
 
     def resolve_bio(self, info):
         profile = self.profile.last()
-        return profile.overview
+        if profile:
+            return profile.overview        
+        return None
 
     def resolve_avatar(self, info):
         profile = self.profile.last()
         if profile:
             avatar = profile.avatar if profile.avatar else None
             return avatar.avatar if avatar else None
+        return None
 
     def resolve_skills(self, info):
         profile = self.profile.last()
