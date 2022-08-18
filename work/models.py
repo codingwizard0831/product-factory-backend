@@ -1,14 +1,14 @@
 from django.conf import settings
-from django.core.exceptions import ValidationError
-from entitlements.exceptions import ValidationError as ValidError
-from django.db import models, transaction
 from django.contrib.postgres.fields import ArrayField
+from django.db import models, transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from model_utils import FieldTracker
 from treebeard.mp_tree import MP_Node
+
+import notification.tasks
 from backend.mixins import TimeStampMixin, UUIDMixin
-from backend.utils import send_email
+from notification.models import Notification
 from talent.models import Person, ProductPerson
 from work.mixins import ProductMixin
 from work.utils import get_person_data, to_dict
@@ -41,7 +41,7 @@ class Capability(MP_Node):
 def save_capability(sender, instance, created, **kwargs):
     if not created:
         # update tasklisting when capability info is updated
-        TaskListing.objects.filter(capability=instance).update(capability_data=to_dict(instance))
+        ChallengeListing.objects.filter(capability=instance).update(capability_data=to_dict(instance))
 
 
 class Attachment(models.Model):
@@ -129,6 +129,9 @@ class Product(ProductMixin):
     def get_members_emails(self):
         return self.productperson_set.all().values_list("person__email_address", flat=True)
 
+    def get_members_ids(self):
+        return self.productperson_set.all().values_list("person__id", flat=True)
+
     def is_product_member(self, person):
         return self.productperson_set.filter(person=person).exists()
 
@@ -143,8 +146,8 @@ class Product(ProductMixin):
 @receiver(post_save, sender=Product)
 def save_product(sender, instance, created, **kwargs):
     if not created:
-        # update tasklisting when product info is updated
-        TaskListing.objects.filter(product=instance).update(
+        # update challengelisting when product info is updated
+        ChallengeListing.objects.filter(product=instance).update(
             product_data=dict(
                 name=instance.name,
                 slug=instance.slug,
@@ -210,10 +213,10 @@ class Initiative(TimeStampMixin, UUIDMixin):
 def save_initiative(sender, instance, created, **kwargs):
     if not created:
         # update tasklisting when initiative info is updated
-        TaskListing.objects.filter(initiative=instance).update(initiative_data=to_dict(instance))
+        ChallengeListing.objects.filter(initiative=instance).update(initiative_data=to_dict(instance))
 
 
-class TaskCategory(models.Model):
+class Skill(models.Model):
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, default=None,
                                related_name="children")
     active = models.BooleanField(default=False, db_index=True)
@@ -224,19 +227,19 @@ class TaskCategory(models.Model):
         return self.name
 
     @staticmethod
-    def get_active_categories(active=True, parent=None):
-        return TaskCategory.objects.filter(active=active, parent=parent).all()
+    def get_active_skills(active=True, parent=None):
+        return Skill.objects.filter(active=active, parent=parent).all()
 
     @staticmethod
-    def get_active_category_list(active=True):
-        return TaskCategory.objects.filter(active=active, parent=None).values('id', 'name')
+    def get_active_skill_list(active=True):
+        return Skill.objects.filter(active=active, parent=None).values('id', 'name')
 
 
 class Expertise(models.Model):
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, default=None,
-                                related_name="expertise_children")
-    category = models.ForeignKey(TaskCategory, on_delete=models.SET_NULL, null=True, blank=True, default=None,
-                                related_name="category_expertise")
+                               related_name="expertise_children")
+    skill = models.ForeignKey(Skill, on_delete=models.SET_NULL, null=True, blank=True, default=None,
+                                 related_name="skill_expertise")
     selectable = models.BooleanField(default=False)
     name = models.CharField(max_length=100)
 
@@ -244,8 +247,8 @@ class Expertise(models.Model):
         return self.name
 
     @staticmethod
-    def get_category_expertise(category):
-        return Expertise.objects.filter(category=category).values('id', 'name')
+    def get_skill_expertise(skill):
+        return Expertise.objects.filter(skill=skill).values('id', 'name')
 
     @staticmethod
     def get_all_expertise(parent=None):
@@ -256,41 +259,52 @@ class Expertise(models.Model):
         return Expertise.objects.filter(parent=None).values('id', 'name')
 
 
-class Task(TimeStampMixin, UUIDMixin):
-    TASK_STATUS_DRAFT = 0
-    TASK_STATUS_BLOCKED = 1
-    TASK_STATUS_AVAILABLE = 2
-    TASK_STATUS_CLAIMED = 3
-    TASK_STATUS_DONE = 4
-    TASK_STATUS_IN_REVIEW = 5
+class Challenge(TimeStampMixin, UUIDMixin):
+    CHALLENGE_STATUS_DRAFT = 0
+    CHALLENGE_STATUS_BLOCKED = 1
+    CHALLENGE_STATUS_AVAILABLE = 2
+    CHALLENGE_STATUS_CLAIMED = 3
+    CHALLENGE_STATUS_DONE = 4
+    CHALLENGE_STATUS_IN_REVIEW = 5
 
-    TASK_STATUS = (
-        (TASK_STATUS_DRAFT, "Draft"),
-        (TASK_STATUS_BLOCKED, "Blocked"),
-        (TASK_STATUS_AVAILABLE, "Available"),
-        (TASK_STATUS_CLAIMED, "Claimed"),
-        (TASK_STATUS_DONE, "Done"),
-        (TASK_STATUS_IN_REVIEW, "In review")
+    CHALLENGE_STATUS = (
+        (CHALLENGE_STATUS_DRAFT, "Draft"),
+        (CHALLENGE_STATUS_BLOCKED, "Blocked"),
+        (CHALLENGE_STATUS_AVAILABLE, "Available"),
+        (CHALLENGE_STATUS_CLAIMED, "Claimed"),
+        (CHALLENGE_STATUS_DONE, "Done"),
+        (CHALLENGE_STATUS_IN_REVIEW, "In review")
     )
-    TASK_PRIORITY = (
+    CHALLENGE_PRIORITY = (
         (0, 'High'),
         (1, 'Medium'),
         (2, 'Low')
     )
+
+    SKILL_MODE = (
+        (0, 'Single Skill'),
+        (1, 'Multiple Skills')
+    )
+
+    REWARD_TYPE = (
+        (0, 'Liquid Points'),
+        (1, 'Non-liquid Points'),
+    )
+
     initiative = models.ForeignKey(Initiative, on_delete=models.SET_NULL, blank=True, null=True)
     capability = models.ForeignKey(Capability, on_delete=models.SET_NULL, blank=True, null=True)
     title = models.TextField()
     description = models.TextField()
     short_description = models.TextField(max_length=256)
-    status = models.IntegerField(choices=TASK_STATUS, default=0)
-    attachment = models.ManyToManyField(Attachment, related_name="task_attachements", blank=True)
-    tag = models.ManyToManyField(Tag, related_name="task_tags", blank=True)
-    category = models.ForeignKey(TaskCategory, on_delete=models.CASCADE, related_name="task", 
-                                    blank=True, null=True, default=None)
-    expertise = models.ManyToManyField(Expertise, related_name="task_expertise")
+    status = models.IntegerField(choices=CHALLENGE_STATUS, default=0)
+    attachment = models.ManyToManyField(Attachment, related_name="challenge_attachements", blank=True)
+    tag = models.ManyToManyField(Tag, related_name="challenge_tags", blank=True)
+    skill = models.ForeignKey(Skill, on_delete=models.CASCADE, related_name="challenge",
+                                 blank=True, null=True, default=None)
+    expertise = models.ManyToManyField(Expertise, related_name="challenge_expertise")
     blocked = models.BooleanField(default=False)
     featured = models.BooleanField(default=False)
-    priority = models.IntegerField(choices=TASK_PRIORITY, default=1)
+    priority = models.IntegerField(choices=CHALLENGE_PRIORITY, default=1)
     published_id = models.IntegerField(default=0, blank=True, editable=False)
     auto_approve_task_claims = models.BooleanField(default=True)
     created_by = models.ForeignKey("talent.Person", on_delete=models.CASCADE, blank=True, null=True,
@@ -298,7 +312,7 @@ class Task(TimeStampMixin, UUIDMixin):
     updated_by = models.ForeignKey("talent.Person", on_delete=models.CASCADE, blank=True, null=True,
                                    related_name="updated_by")
     tracker = FieldTracker()
-    comments_start = models.ForeignKey(to="comments.taskcomment", on_delete=models.SET_NULL, null=True, editable=False)
+    comments_start = models.ForeignKey(to="comments.challengecomment", on_delete=models.SET_NULL, null=True, editable=False)
     reviewer = models.ForeignKey("talent.Person", on_delete=models.SET_NULL, null=True)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, null=True)
     video_url = models.URLField(blank=True, null=True)
@@ -307,9 +321,11 @@ class Task(TimeStampMixin, UUIDMixin):
                                            default=None,
                                            blank=True,
                                            on_delete=models.SET_NULL)
+    skill_mode = models.IntegerField(choices=SKILL_MODE, default=0)
+    reward_type = models.IntegerField(choices=REWARD_TYPE, default=1)
 
     class Meta:
-        verbose_name_plural = "Tasks"
+        verbose_name_plural = "Challenges"
 
     def __str__(self):
         return self.title
@@ -328,7 +344,7 @@ class Task(TimeStampMixin, UUIDMixin):
         priority = input_data.get("priority", [])
         assignee = input_data.get("assignee", [])
         task_creator = input_data.get("task_creator", [])
-        categories = input_data.get("categories", [])
+        skills = input_data.get("skils", [])
 
         if statuses:
             filter_data["status__in"] = statuses
@@ -343,42 +359,43 @@ class Task(TimeStampMixin, UUIDMixin):
             filter_data["created_by__in"] = task_creator
 
         if assignee:
-            filter_data["taskclaim__kind__in"] = [0, 1]
-            filter_data["taskclaim__person_id__in"] = assignee
+            filter_data["bountyclaim__kind__in"] = [0, 1]
+            filter_data["bountyclaim__person_id__in"] = assignee
 
-        if categories:
-            filter_data["category__parent__in"] = categories
+        if skills:
+            filter_data["skill__parent__in"] = skills
 
-        queryset = Task.objects.filter(**filter_data)
+        queryset = Challenge.objects.filter(**filter_data)
         if exclude_data:
             queryset = queryset.exclude(**exclude_data)
 
         return queryset.order_by(sorted_by).all()
 
-    def get_task_link(self, show_domain_name=True):
+    def get_challenge_link(self, show_domain_name=True):
         try:
-            product = self.producttask_set.first().product
+            product = self.productchallenge_set.first().product
             product_owner = product.get_product_owner()
             domain_name = settings.FRONT_END_SERVER if show_domain_name else ""
-            return f"{domain_name}/{product_owner.username}/{product.slug}/tasks/{self.published_id}"
-        except ProductTask.DoesNotExist:
+            return f"{domain_name}/{product_owner.username}/{product.slug}/challenges/{self.published_id}"
+        except ProductChallenge.DoesNotExist:
             return None
 
 
-@receiver(post_save, sender=Task)
-def save_task(sender, instance, created, **kwargs):
-    # If task changed status to available/claimed/done
+@receiver(post_save, sender=Challenge)
+def save_challenge(sender, instance, created, **kwargs):
+    # If challenge changed status to available/claimed/done
     try:
         reviewer = instance.reviewer
 
         # set contributor role for user if task is done
-        if instance.status == Task.TASK_STATUS_DONE and instance.tracker.previous('status') != Task.TASK_STATUS_DONE:
+        if instance.status == Challenge.CHALLENGE_STATUS_DONE and \
+            instance.tracker.previous('status') != Challenge.CHALLENGE_STATUS_DONE:
             try:
-                task_claim = instance.taskclaim_set.filter(kind=0).first()
-                if task_claim:
+                bounty_claim = instance.taskclaim_set.filter(kind=0).first()
+                if bounty_claim:
                     product_person_data = dict(
                         product_id=instance.product.id,
-                        person_id=task_claim.person.id
+                        person_id=bounty_claim.person.id
                     )
                     if not ProductPerson.objects.filter(**product_person_data,
                                                         right__in=[ProductPerson.PERSON_TYPE_CONTRIBUTOR,
@@ -391,20 +408,23 @@ def save_task(sender, instance, created, **kwargs):
                 print("Failed to change a user role", e, flush=True)
 
         if instance.tracker.previous('status') != instance.status \
-                and instance.status == Task.TASK_STATUS_CLAIMED \
+                and instance.status == Challenge.CHALLENGE_STATUS_CLAIMED \
                 and reviewer:
-            send_email(
-                to_emails=reviewer.email_address,
-                subject='Task status changed',
-                content=f"""
-                    The task {instance.title} is claimed now.
-                    You can see the task here: {instance.get_task_link()}
-                """
-            )
+            notification.tasks.send_notification.delay([Notification.Type.EMAIL],
+                                                       Notification.EventType.TASK_STATUS_CHANGED,
+                                                       receivers=[reviewer.id],
+                                                       title=instance.title,
+                                                       link=instance.get_challenge_link())
     except Person.DoesNotExist:
         pass
+    
+    
+    has_bountyclaim_in_review = False
+    for bounty in instance.bounty_set.all():
+        if bounty.bountyclaim_set.filter(kind=0).count() > 0:
+            has_bountyclaim_in_review = True
 
-    task_listing_data = dict(
+    challenge_listing_data = dict(
         title=instance.title,
         description=instance.description,
         short_description=instance.short_description,
@@ -428,62 +448,98 @@ def save_task(sender, instance, created, **kwargs):
             "video_url": instance.product.video_url
         } if instance.product else None,
         product=instance.product,
-        has_active_depends=Task.objects.filter(taskdepend__task=instance.id).exclude(
-            status=Task.TASK_STATUS_DONE).exists(),
+        has_active_depends=Challenge.objects.filter(challengedepend__challenge=instance.id).exclude(
+            status=Challenge.CHALLENGE_STATUS_DONE).exists(),
         initiative_id=instance.initiative.id if instance.initiative else None,
         initiative_data=to_dict(instance.initiative) if instance.initiative else None,
         capability_id=instance.capability.id if instance.capability is not None else None,
         capability_data=to_dict(instance.capability) if instance.capability else None,
-        in_review=instance.taskclaim_set.filter(kind=0).count() > 0,
+        in_review=has_bountyclaim_in_review,
         video_url=instance.video_url,
     )
 
-    task_claim = instance.taskclaim_set.filter(kind__in=[0, 1]).first()
+    # task_claim = instance.taskclaim_set.filter(kind__in=[0, 1]).first()
+    all_bounty_claim = []
+    for bounty in instance.bounty_set.all():
+        bounty_claim = bounty.bountyclaim_set.filter(kind__in=[0, 1]).first()
+        if bounty_claim:
+            all_bounty_claim.append({
+                'bounty_claim': bounty_claim.id, 
+                'person': get_person_data(bounty_claim.person),
+                'person_id': '%s'%bounty_claim.person.id})
 
-    if task_claim:
-        task_listing_data["task_claim"] = to_dict(task_claim)
-        task_listing_data["assigned_to_data"] = get_person_data(task_claim.person)
-        task_listing_data["assigned_to_person_id"] = task_claim.person.id if task_claim.person else None
+    if len(all_bounty_claim) > 0:
+        challenge_listing_data["task_claim"] = all_bounty_claim
+        # challenge_listing_data["assigned_to_data"] = get_person_data(task_claim.person)
+        # challenge_listing_data["assigned_to_person_id"] = task_claim.person.id if task_claim.person else None
+        challenge_listing_data["assigned_to_data"] = None
+        challenge_listing_data["assigned_to_person_id"] = None
     else:
-        task_listing_data["task_claim"] = None
-        task_listing_data["assigned_to_data"] = None
-        task_listing_data["assigned_to_person_id"] = None
+        challenge_listing_data["task_claim"] = None
+        challenge_listing_data["assigned_to_data"] = None
+        challenge_listing_data["assigned_to_person_id"] = None
 
     if created:
         product = instance.product
-        last_product_task = None
+        last_product_challenge = None
         if product:
-            last_product_task = Task.objects \
-                .filter(producttask__product=product) \
+            last_product_challenge = Challenge.objects \
+                .filter(productchallenge__product=product) \
                 .order_by('-published_id').last()
-        published_id = last_product_task.published_id + 1 if last_product_task else 1
+        published_id = last_product_challenge.published_id + 1 if last_product_challenge else 1
         instance.published_id = published_id
         instance.save()
 
-        task_listing_data["published_id"] = published_id
+        challenge_listing_data["published_id"] = published_id
 
     # create TaskListing object
-    tasklisting_exist = TaskListing.objects.filter(task=instance).exists()
+    challengelisting_exist = ChallengeListing.objects.filter(challenge=instance).exists()
 
-    if tasklisting_exist:
-        TaskListing.objects.filter(task=instance).update(**task_listing_data)
+    if challengelisting_exist:
+        ChallengeListing.objects.filter(challenge=instance).update(**challenge_listing_data)
     else:
-        TaskListing.objects.create(
-            task=instance,
-            **task_listing_data
+        ChallengeListing.objects.create(
+            challenge=instance,
+            **challenge_listing_data
         )
 
 
-class TaskListing(models.Model):
-    task = models.OneToOneField(Task, on_delete=models.CASCADE, unique=True)
+class Bounty(TimeStampMixin):
+    BOUNTY_STATUS_DRAFT = 0
+    BOUNTY_STATUS_BLOCKED = 1
+    BOUNTY_STATUS_AVAILABLE = 2
+    BOUNTY_STATUS_CLAIMED = 3
+    BOUNTY_STATUS_DONE = 4
+    BOUNTY_STATUS_IN_REVIEW = 5
+
+    BOUNTY_STATUS = (
+        (BOUNTY_STATUS_DRAFT, "Draft"),
+        (BOUNTY_STATUS_BLOCKED, "Blocked"),
+        (BOUNTY_STATUS_AVAILABLE, "Available"),
+        (BOUNTY_STATUS_CLAIMED, "Claimed"),
+        (BOUNTY_STATUS_DONE, "Done"),
+        (BOUNTY_STATUS_IN_REVIEW, "In review")
+    )
+
+    challenge = models.ForeignKey(Challenge, on_delete=models.CASCADE)
+    skill = models.ForeignKey(Skill, on_delete=models.CASCADE, related_name="bounty_skill",
+                                 blank=True, null=True, default=None)
+    expertise = models.ManyToManyField(Expertise, related_name="bounty_expertise")
+    points = models.IntegerField()
+    status = models.IntegerField(choices=BOUNTY_STATUS, default=BOUNTY_STATUS_AVAILABLE)
+    is_active = models.BooleanField(default=True)
+
+
+class ChallengeListing(models.Model):
+    challenge = models.OneToOneField(Challenge, on_delete=models.CASCADE, unique=True)
     title = models.TextField()
     description = models.TextField()
     short_description = models.TextField(max_length=256)
-    status = models.IntegerField(choices=Task.TASK_STATUS, default=0)
+    status = models.IntegerField(choices=Challenge.CHALLENGE_STATUS, default=0)
     tags = ArrayField(ArrayField(models.CharField(max_length=254)))
     blocked = models.BooleanField(default=False)
     featured = models.BooleanField(default=False)
-    priority = models.IntegerField(choices=Task.TASK_PRIORITY, default=1)
+    priority = models.IntegerField(choices=Challenge.CHALLENGE_PRIORITY, default=1)
     published_id = models.IntegerField(default=0, blank=True, editable=False)
     auto_approve_task_claims = models.BooleanField(default=True)
     task_creator = models.ForeignKey(Person, on_delete=models.SET_NULL, related_name="creator", null=True)
@@ -496,7 +552,7 @@ class TaskListing(models.Model):
 
     task_claim = models.JSONField(null=True)
     assigned_to_data = models.JSONField(null=True)
-    assigned_to_person = models.ForeignKey(Person, on_delete=models.SET_NULL, null=True, related_name="task_listing")
+    assigned_to_person = models.ForeignKey(Person, on_delete=models.SET_NULL, null=True, related_name="challenge_listing")
     has_active_depends = models.BooleanField(default=False)
     initiative = models.ForeignKey(Initiative, on_delete=models.SET_NULL, null=True)
     initiative_data = models.JSONField(null=True)
@@ -519,61 +575,61 @@ class TaskListing(models.Model):
         tags = input_data.get("tags", [])
         priority = input_data.get("priority", [])
         assignee = input_data.get("assignee", [])
-        categories = input_data.get("categories", [])
+        skills = input_data.get("skills", [])
         task_creator = input_data.get("task_creator", [])
 
         if statuses:
             filter_data["status__in"] = statuses
 
-        if Task.TASK_STATUS_AVAILABLE in statuses:
+        if Challenge.CHALLENGE_STATUS_AVAILABLE in statuses:
             filter_data["has_active_depends"] = False
 
         if tags:
             filter_data["tags__contains"] = tags
 
-        if categories:
-            filter_data["task__category__parent__in"] = categories
+        if skills:
+            filter_data["challenge__skill__parent__in"] = skills
 
         if priority:
             filter_data["priority__in"] = priority
 
         if task_creator:
-            filter_data["task_creator_id__in"] = task_creator
+            filter_data["challenge_creator_id__in"] = task_creator
 
         if assignee:
             filter_data["assigned_to_person_id__in"] = assignee
 
         filter_data["product__is_private"] = False
 
-        queryset = TaskListing.objects.filter(**filter_data)
+        queryset = ChallengeListing.objects.filter(**filter_data)
         if exclude_data:
             queryset = queryset.exclude(**exclude_data)
 
         return queryset.distinct().order_by(sorted_by).all()
 
 
-class TaskDepend(models.Model):
-    task = models.ForeignKey(to=Task, on_delete=models.CASCADE, related_name='Task')
-    depends_by = models.ForeignKey(to=Task, on_delete=models.CASCADE)
+class ChallengeDepend(models.Model):
+    challenge = models.ForeignKey(to=Challenge, on_delete=models.CASCADE, related_name='Challenge')
+    depends_by = models.ForeignKey(to=Challenge, on_delete=models.CASCADE)
 
     class Meta:
-        db_table = 'work_task_depend'
+        db_table = 'work_challenge_depend'
 
 
-class ProductTask(TimeStampMixin, UUIDMixin):
+class ProductChallenge(TimeStampMixin, UUIDMixin):
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    task = models.ForeignKey(Task, on_delete=models.CASCADE)
+    challenge = models.ForeignKey(Challenge, on_delete=models.CASCADE)
 
 
-@receiver(post_save, sender=ProductTask)
+@receiver(post_save, sender=ProductChallenge)
 def save_product_task(sender, instance, created, **kwargs):
     if created:
-        task = instance.task
-        last_product_task = Task.objects \
-            .filter(producttask__product=instance.product) \
+        challenge = instance.challenge
+        last_product_challenge = Challenge.objects \
+            .filter(productchallenge__product=instance.product) \
             .order_by('-published_id').first()
-        task.published_id = last_product_task.published_id + 1 if last_product_task else 1
-        task.save()
+        challenge.published_id = last_product_challenge.published_id + 1 if last_product_challenge else 1
+        challenge.save()
 
 
 class CodeRepository(TimeStampMixin, UUIDMixin):

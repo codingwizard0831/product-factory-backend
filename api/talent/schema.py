@@ -1,8 +1,8 @@
 from django.db.models import Count, Q
 
-from matching.models import TaskClaim, CLAIM_TYPE_DONE
+from matching.models import BountyClaim, CLAIM_TYPE_DONE
 from .types import *
-from work.models import CodeRepository
+from work.models import Bounty, CodeRepository
 from api.work.types import CodeRepositoryType
 from .mutations import CreatePersonMutation, SignInPersonMutation, AvatarUploadMutation, UpdatePersonMutation, \
     AvatarDeleteMutation
@@ -21,11 +21,6 @@ class PersonQuery(ObjectType):
                                    starts_with=graphene.String())
     person_info = graphene.Field(PersonPortfolioType,
                                  person_slug=graphene.String())
-
-    # person_tasks = graphene.Field(PersonPaginatedTasks,
-    #                               page=graphene.Int(),
-    #                               person_slug=graphene.String(),
-    #                               filters=FilterType())
 
     person_tasks = graphene.List(PersonTask,
                                  person_slug=graphene.String())
@@ -94,20 +89,26 @@ class PersonQuery(ObjectType):
         task_filters = {}
         # if filters:
             # task_filters = make_filters(filters)
-        task_claims = TaskClaim.objects.filter(person__slug=person_slug, kind=CLAIM_TYPE_DONE, **task_filters).order_by(
-            '-task__updated_at').select_related('task').all()
-        tasks = [i.task for i in task_claims]
-        return tasks
+        bounty_claims = BountyClaim.objects.filter(person__slug=person_slug, kind=CLAIM_TYPE_DONE, **task_filters).order_by(
+            '-bounty__updated_at').select_related('bounty').all()
+        challenges = [i.bounty.challenge for i in bounty_claims]
+        return challenges
         # return get_paginator(tasks, page_size, page, PersonPaginatedTasks)
 
     @staticmethod
     def resolve_person_task_delivery_message(info, *args, **kwargs):
-        task_id = kwargs.get('task_id')
+        challenge_id = kwargs.get('task_id')
         person_slug = kwargs.get('person_slug')
-        if task_id and person_slug:
-            task_claim = TaskClaim.objects.filter(task_id=task_id, kind=CLAIM_TYPE_DONE,
+        challenge_bounty = Bounty.objects.filter(challenge_id=challenge_id)
+        bounty_claim = None
+        for bounty in challenge_bounty:
+            bounty_claim = BountyClaim.objects.filter(bounty=bounty, kind=CLAIM_TYPE_DONE,
                                                   person__slug=person_slug).last()
-            return task_claim.delivery_messages.filter(kind=CLAIM_TYPE_DONE).last()
+            if bounty_claim:
+                delivery_attempt = bounty_claim.delivery_attempt.filter(kind=BountyDeliveryAttempt.REQUEST_TYPE_APPROVED).last()
+                if delivery_attempt:
+                    return delivery_attempt
+
         return
 
 
