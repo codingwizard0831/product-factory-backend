@@ -2,6 +2,7 @@ from django.db.models import Q
 import graphene
 from graphene_django.types import DjangoObjectType, ObjectType
 from api.talent.types import PersonType
+from api.matching.types import BountyClaimType
 from api.utils import get_current_person
 from api.work.utils import get_right_task_status, get_video_link
 from matching.models import CLAIM_TYPE_IN_REVIEW, BountyClaim
@@ -11,11 +12,6 @@ from talent.models import ProductPerson
 class BountyType(DjangoObjectType):
     class Meta:
         model = Bounty
-        convert_choices_to_enum = False
-
-class BountyClaimType(DjangoObjectType):
-    class Meta:
-        model = BountyClaim
         convert_choices_to_enum = False
 
 class ExpertiseType(DjangoObjectType):
