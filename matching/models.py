@@ -41,8 +41,8 @@ def save_bounty_claim(sender, instance, created, **kwargs):
     reviewer_user = reviewer.user if reviewer else None
 
     if not created:
-        # contributor submit the work for review
-        if instance.kind == CLAIM_TYPE_DONE and instance.tracker.previous("kind") is not CLAIM_TYPE_DONE:
+        # contributor has submitted the work for review
+        if instance.kind == CLAIM_TYPE_IN_REVIEW and instance.tracker.previous("kind") is not CLAIM_TYPE_IN_REVIEW:
             challenge = instance.bounty.challenge
             subject = f"The challenge \"{challenge.title}\" is ready to review"
             message = f"You can see the challenge here: {challenge.get_challenge_link()}"
@@ -56,17 +56,17 @@ def save_bounty_claim(sender, instance, created, **kwargs):
 
 
 class BountyDeliveryAttempt(TimeStampMixin):
-    REQUEST_TYPE_NEW = 0
-    REQUEST_TYPE_APPROVED = 1
-    REQUEST_TYPE_REJECTED = 2
+    SUBMISSION_TYPE_NEW = 0
+    SUBMISSION_TYPE_APPROVED = 1
+    SUBMISSION_TYPE_REJECTED = 2
 
-    CLAIM_REQUEST_TYPE = (
-        (REQUEST_TYPE_NEW, "New"),
-        (REQUEST_TYPE_APPROVED, "Approved"),
-        (REQUEST_TYPE_REJECTED, "Rejected"),
+    SUBMISSION_TYPES = (
+        (SUBMISSION_TYPE_NEW, "New"),
+        (SUBMISSION_TYPE_APPROVED, "Approved"),
+        (SUBMISSION_TYPE_REJECTED, "Rejected"),
     )
     
-    kind = models.IntegerField(choices=CLAIM_REQUEST_TYPE, default=0)
+    kind = models.IntegerField(choices=SUBMISSION_TYPES, default=0)
     bounty_claim = models.ForeignKey(BountyClaim, on_delete=models.CASCADE, blank=True, null=True,
                                    related_name="delivery_attempt")
     person = models.ForeignKey(Person, on_delete=models.CASCADE, blank=True, null=True)
@@ -113,5 +113,4 @@ def save_bounty_claim_request(sender, instance, created, **kwargs):
                                                            Notification.EventType.CONTRIBUTOR_LEFT_TASK,
                                                            receivers=[reviewer.id],
                                                            task_title=bounty_claim.bounty.challenge.title)
-        if bounty_claim.bounty.challenge.kind == CLAIM_TYPE_IN_REVIEW:
-            bounty_claim.delete()
+

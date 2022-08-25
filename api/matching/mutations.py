@@ -5,17 +5,17 @@ from matching.models import BountyClaim
 from notification.models import Notification
 from talent.models import Person
 from work.models import Challenge
-from .types import TaskClaimInput, TaskClaimType
+from .types import BountyClaimInput, BountyClaimType
 
 
-class CreateTaskClaimMutation(graphene.Mutation):
+class BountyTaskClaimMutation(graphene.Mutation):
     class Arguments:
-        input = TaskClaimInput(
+        input = BountyClaimInput(
             required=True,
             description=("Fields required to create a product"),
         )
 
-    match = graphene.Field(TaskClaimType)
+    match = graphene.Field(BountyClaimType)
     status = graphene.Boolean()
 
     @staticmethod
@@ -41,4 +41,4 @@ class CreateTaskClaimMutation(graphene.Mutation):
         except:
             pass
 
-        return CreateTaskClaimMutation(match=match, status=status)
+        return BountyTaskClaimMutation(match=match, status=status)

@@ -105,7 +105,7 @@ class PersonQuery(ObjectType):
             bounty_claim = BountyClaim.objects.filter(bounty=bounty, kind=CLAIM_TYPE_DONE,
                                                   person__slug=person_slug).last()
             if bounty_claim:
-                delivery_attempt = bounty_claim.delivery_attempt.filter(kind=BountyDeliveryAttempt.REQUEST_TYPE_APPROVED).last()
+                delivery_attempt = bounty_claim.delivery_attempt.filter(kind=BountyDeliveryAttempt.SUBMISSION_TYPE_APPROVED).last()
                 if delivery_attempt:
                     return delivery_attempt
 

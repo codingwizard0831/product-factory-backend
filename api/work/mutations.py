@@ -66,8 +66,6 @@ class CreateProductMutation(graphene.Mutation, InfoType):
         new_product_person.save()
 
         return CreateProductMutation(status=True, message='Product successfully created')
-        # except:
-        #     return CreateProductMutation(status=False, message='Error with product creation')
 
 
 class UpdateProductMutation(graphene.Mutation, InfoType):
@@ -154,13 +152,6 @@ class CreateCapabilityMutation(graphene.Mutation):
                 description=arguments.description,
                 video_link=(arguments.video_link if arguments.video_link is not None else '')
             )
-
-            # if arguments.stacks is not None:
-            #     for stack_id in arguments.stacks:
-            #         new_capability_stack = CapabilityStack(
-            #             capability=Capability(new_node).id, stack=Stack(stack_id)
-            #         )
-            #         new_capability_stack.save()
 
             if arguments.attachments is not None:
                 for attachment_id in arguments.attachments:
@@ -796,51 +787,6 @@ class LeaveBountyMutation(InfoStatusMutation, graphene.Mutation):
             return LeaveBountyMutation(success=False, message="The bounty claim doesn't exist")
 
 
-class InReviewTaskMutation(InfoStatusMutation, graphene.Mutation):
-    class Arguments:
-        task_id = graphene.Int(required=True)
-        file_list = graphene.List(Upload)
-        delivery_message = graphene.String()
-
-    @staticmethod
-    @is_current_person
-    def mutate(current_person, info, *args, bounty_id, delivery_message, file_list):
-        try:
-            bounty = Bounty.objects.get(id=bounty_id)
-            bounty_claim = bounty.bountyclaim_set.filter(person=current_person, kind=CLAIM_TYPE_ACTIVE, bounty=bounty).last()
-
-            if not bounty_claim:
-                return InReviewTaskMutation(success=False, message="No bounty claim was found")
-
-            bounty_delivery_attempt = BountyDeliveryAttempt.objects.create(kind=BountyDeliveryAttempt.REQUEST_TYPE_NEW, 
-                                                                            person=current_person,
-                                                                            bounty_claim=bounty_claim,
-                                                                            delivery_message=delivery_message)
-            attachments = []
-            for i in file_list:
-                attachments.append(BountyDeliveryAttachment.objects.create(**upload_file(i, 'review'),
-                                                                         bounty_delivery_attempt=bounty_delivery_attempt))
-
-            bounty_claim.kind = CLAIM_TYPE_IN_REVIEW
-            bounty_claim.save()
-            if bounty.reviewer:
-                notification.tasks.send_notification.delay([Notification.Type.EMAIL],
-                                                           Notification.EventType.TASK_IN_REVIEW,
-                                                           receivers=[bounty.reviewer.id],
-                                                           title=bounty.title,
-                                                           link=bounty.get_challenge_link())
-
-            # call task save event to update tasklisting model
-            bounty.status = Bounty.BOUNTY_STATUS_IN_REVIEW
-            bounty.save()
-            # task_from_list = TaskListing.objects.get(task_id=bounty.id)
-            # task_from_list.status = Task.TASK_STATUS_IN_REVIEW
-
-            return InReviewTaskMutation(success=True, message='The task status was changed to "In review"')
-        except Challenge.DoesNotExist:
-            return InReviewTaskMutation(success=False, message="The task doesn't exist")
-
-
 class ClaimBountyMutation(InfoStatusMutation, graphene.Mutation):
     class Arguments:
         bounty_id = graphene.Int(required=True)
@@ -905,7 +851,6 @@ class ClaimBountyMutation(InfoStatusMutation, graphene.Mutation):
             if claimed_bounty:
                 claimed_challenge = claimed_bounty.bounty.challenge
 
-                print(claimed_challenge.product, claimed_challenge.product.name)
                 return ClaimBountyMutation(
                     success=False,
                     is_need_agreement=False,
@@ -962,120 +907,180 @@ class ClaimBountyMutation(InfoStatusMutation, graphene.Mutation):
         return ClaimBountyMutation(success=success, message=message, is_need_agreement=is_need_agreement)
 
 
-class RejectTaskMutation(InfoStatusMutation, graphene.Mutation):
+class SubmitBountyMutation(InfoStatusMutation, graphene.Mutation):
     class Arguments:
-        task_id = graphene.Int(required=True)
+        bounty_id = graphene.Int(required=True)
+        file_list = graphene.List(Upload)
+        delivery_message = graphene.String()
+
+    @staticmethod
+    @is_current_person
+    def mutate(current_person, info, *args, bounty_id, delivery_message, file_list):
+        try:
+            bounty = Bounty.objects.get(id=bounty_id)
+            bounty_claim = bounty.bountyclaim_set.filter(person=current_person, kind=CLAIM_TYPE_ACTIVE, bounty=bounty).last()
+
+            if not bounty_claim:
+                return SubmitBountyMutation(success=False, message="No bounty claim was found")
+
+            bounty_delivery_attempt = BountyDeliveryAttempt.objects.create(kind=BountyDeliveryAttempt.SUBMISSION_TYPE_NEW, 
+                                                                            person=current_person,
+                                                                            bounty_claim=bounty_claim,
+                                                                            delivery_message=delivery_message)
+            attachments = []
+            for i in file_list:
+                attachments.append(BountyDeliveryAttachment.objects.create(**upload_file(i, 'review'),
+                                                                         bounty_delivery_attempt=bounty_delivery_attempt))
+
+            bounty_claim.kind = CLAIM_TYPE_IN_REVIEW
+            bounty_claim.save()
+
+            if bounty.challenge.reviewer:
+                notification.tasks.send_notification.delay([Notification.Type.EMAIL],
+                                                           Notification.EventType.TASK_IN_REVIEW,
+                                                           receivers=[bounty.challenge.reviewer.id],
+                                                           title=bounty.challenge.title,
+                                                           link=bounty.challenge.get_challenge_link())
+
+            # call task save event to update tasklisting model
+            bounty.status = Bounty.BOUNTY_STATUS_IN_REVIEW
+            bounty.save()
+
+            # task_from_list = TaskListing.objects.get(task_id=bounty.id)
+            # task_from_list.status = Task.TASK_STATUS_IN_REVIEW
+
+            return SubmitBountyMutation(success=True, message='The bounty status was changed to "In review"')
+        except Bounty.DoesNotExist:
+            return SubmitBountyMutation(success=False, message="The bounty doesn't exist")
+
+
+class RejectBountySubmissionMutation(InfoStatusMutation, graphene.Mutation):
+    class Arguments:
+        bounty_id = graphene.Int(required=True)
 
     @staticmethod
     @is_current_person
     def mutate(current_person, info, *args, **kwargs):
         try:
-            task_id = kwargs.get("task_id")
-            task = Challenge.objects.get(id=task_id)
+            bounty_id = kwargs.get("bounty_id")
+            bounty = Bounty.objects.get(id=bounty_id)
 
             # check if user has permissions
-            if not is_admin_or_manager(current_person, task.product.slug):
-                return RejectTaskMutation(success=False, message="You don't have permissions")
+            if not is_admin_or_manager(current_person, bounty.challenge.product.slug):
+                return RejectBountySubmissionMutation(success=False, message="You don't have permissions")
 
-            # set "Failed" status to task claims
-            task_claim = task.taskclaim_set.filter(kind__in=[CLAIM_TYPE_IN_REVIEW]).first()
-            task_claim.kind = CLAIM_TYPE_FAILED
-            task_claim.save()
+            # set "Failed" status to bounty claim
+            bounty_claim = bounty.bountyclaim_set.filter(kind__in=[CLAIM_TYPE_IN_REVIEW]).first()
+            bounty_claim.kind = CLAIM_TYPE_FAILED
+            bounty_claim.save()
+
+            # update bounty_delivery_attempt
+            bounty_delivery_attempt = BountyDeliveryAttempt.objects.filter(bounty_claim=bounty_claim).last()
+            bounty_delivery_attempt.kind = BountyDeliveryAttempt.SUBMISSION_TYPE_REJECTED
+            bounty_delivery_attempt.save()
 
             # set task status "Available"
-            task.status = Task.TASK_STATUS_AVAILABLE
-            task.updated_by = current_person
-            task.updated_at = datetime.now()
-            task.save()
+            bounty.status = Bounty.BOUNTY_STATUS_AVAILABLE
+            bounty.updated_by = current_person
+            bounty.save()
 
             notification.tasks.send_notification.delay([Notification.Type.EMAIL],
                                                        Notification.EventType.SUBMISSION_REJECTED,
                                                        receivers=list(
-                                                           {task.created_by.id, task.reviewer.id, 
-                                                            current_person.id, task_claim.person.id}),
-                                                       task_id=task.id,
-                                                       user=task_claim.person.slug)            
+                                                           {bounty.challenge.created_by.id, bounty.challenge.reviewer.id, 
+                                                            current_person.id, bounty_claim.person.id}),
+                                                       task_id=bounty.challenge.id,
+                                                       user=bounty_claim.person.slug)            
 
-            return RejectTaskMutation(success=True, message="The work has been rejected")
-        except Task.DoesNotExist:
-            return RejectTaskMutation(success=False, message="The task doesn't exist")
+            return RejectBountySubmissionMutation(success=True, message="The bounty submission has been rejected")
+        except Bounty.DoesNotExist:
+            return RejectBountySubmissionMutation(success=False, message="The bounty doesn't exist")
 
 
-class RequestRevisionTaskMutation(InfoStatusMutation, graphene.Mutation):
+class RequestBountyRevisionMutation(InfoStatusMutation, graphene.Mutation):
     class Arguments:
-        task_id = graphene.Int(required=True)
+        bounty_id = graphene.Int(required=True)
 
     @staticmethod
     @is_current_person
     def mutate(current_person, info, *args, **kwargs):
         try:
-            task_id = kwargs.get("task_id")
-            task = Task.objects.get(id=task_id)
+            bounty_id = kwargs.get("bounty_id")
+            bounty = Bounty.objects.get(id=bounty_id)
 
             # check if user has permissions
-            if not is_admin_or_manager(current_person, task.product.slug):
-                return RequestRevisionTaskMutation(success=False, message="You don't have permissions")
+            if not is_admin_or_manager(current_person, bounty.challenge.product.slug):
+                return RequestBountyRevisionMutation(success=False, message="You don't have permissions")
 
-            # set "Failed" status to task claims
-            task_claim = task.taskclaim_set.filter(kind__in=[CLAIM_TYPE_IN_REVIEW]).first()
-            task_claim.kind = CLAIM_TYPE_ACTIVE
-            task_claim.save()
+            # set "Failed" status to bounty claim
+            bounty_claim = bounty.bountyclaim_set.filter(kind__in=[CLAIM_TYPE_IN_REVIEW]).first()
+            bounty_claim.kind = CLAIM_TYPE_ACTIVE
+            bounty_claim.save()
 
-            # set task status "Claimed"
-            task.status = Task.TASK_STATUS_CLAIMED
-            task.updated_by = current_person
-            task.updated_at = datetime.now()
-            task.save()
+            # update bounty_delivery_attempt
+            bounty_delivery_attempt = BountyDeliveryAttempt.objects.filter(bounty_claim=bounty_claim).last()
+            bounty_delivery_attempt.kind = BountyDeliveryAttempt.SUBMISSION_TYPE_REJECTED
+            bounty_delivery_attempt.save()
+
+            # set bounty status "Claimed"
+            bounty.status = Bounty.BOUNTY_STATUS_CLAIMED
+            bounty.updated_by = current_person
+            bounty.save()
 
             notification.tasks.send_notification.delay([Notification.Type.EMAIL],
                                                        Notification.EventType.SUBMISSION_REVISION_REQUESTED,
                                                        receivers=list(
-                                                           {task.created_by.id, task.reviewer.id, 
-                                                           current_person.id, task_claim.person.id}),
-                                                       task_id=task.id,
-                                                       user=task_claim.person.slug)            
+                                                           {bounty.challenge.created_by.id, bounty.challenge.reviewer.id, 
+                                                           current_person.id, bounty_claim.person.id}),
+                                                       task_id=bounty.challenge.id,
+                                                       user=bounty_claim.person.slug)            
 
-            return RequestRevisionTaskMutation(success=True, message="The work has been requested for revision")
-        except Task.DoesNotExist:
-            return RequestRevisionTaskMutation(success=False, message="The task doesn't exist")
+            return RequestBountyRevisionMutation(success=True, message="The bounty submission has been requested for revision")
+        except Bounty.DoesNotExist:
+            return RequestBountyRevisionMutation(success=False, message="The bounty doesn't exist")
 
 
-class ApproveTaskMutation(InfoStatusMutation, graphene.Mutation):
+class ApproveBountySubmissionMutation(InfoStatusMutation, graphene.Mutation):
     class Arguments:
-        task_id = graphene.Int(required=True)
+        bounty_id = graphene.Int(required=True)
 
     @staticmethod
     @is_current_person
     def mutate(current_person, info, *args, **kwargs):
         try:
-            task_id = kwargs.get("task_id")
-            task = Task.objects.get(id=task_id)
+            bounty_id = kwargs.get("bounty_id")
+            bounty = Bounty.objects.get(id=bounty_id)
 
             # check if user has permissions
-            if not is_admin_or_manager(current_person, task.product.slug):
-                return ApproveTaskMutation(success=False, message="You don't have permissions")
+            if not is_admin_or_manager(current_person, bounty.challenge.product.slug):
+                return ApproveBountySubmissionMutation(success=False, message="You don't have permissions")
 
-            # set "Done" status to task claims
-            task_claim = task.taskclaim_set.filter(kind__in=[CLAIM_TYPE_IN_REVIEW]).first()
-            task_claim.kind = CLAIM_TYPE_DONE
-            task_claim.save()
+            # set "Done" status to bounty claim
+            bounty_claim = bounty.bountyclaim_set.filter(kind__in=[CLAIM_TYPE_IN_REVIEW]).first()
+            bounty_claim.kind = CLAIM_TYPE_DONE
+            bounty_claim.save()
+
+            # update bounty_delivery_attempt
+            bounty_delivery_attempt = BountyDeliveryAttempt.objects.filter(bounty_claim=bounty_claim).last()
+            bounty_delivery_attempt.kind = BountyDeliveryAttempt.SUBMISSION_TYPE_APPROVED
+            bounty_delivery_attempt.save()
 
             # set task status "Done"
-            task.status = Task.TASK_STATUS_DONE
-            task.updated_by = current_person
-            task.updated_at = datetime.now()
-            task.save()
+            bounty.status = Bounty.BOUNTY_STATUS_DONE
+            bounty.updated_by = current_person
+            bounty.save()
+
             notification.tasks.send_notification.delay([Notification.Type.EMAIL],
                                                        Notification.EventType.SUBMISSION_APPROVED,
                                                        receivers=list(
-                                                           {task.created_by.id, task.reviewer.id, 
-                                                            current_person.id, task_claim.person.id}),
-                                                       task_id=task.id,
-                                                       user=task_claim.person.slug)
+                                                           {bounty.challenge.created_by.id, bounty.challenge.reviewer.id, 
+                                                            current_person.id, bounty_claim.person.id}),
+                                                       task_id=bounty.id,
+                                                       user=bounty_claim.person.slug)
 
-            return ApproveTaskMutation(success=True, message="The work has been approved")
-        except Task.DoesNotExist:
-            return ApproveTaskMutation(success=False, message="The task doesn't exist")
+            return ApproveBountySubmissionMutation(success=True, message="The bounty submission has been approved")
+        except Bounty.DoesNotExist:
+            return ApproveBountySubmissionMutation(success=False, message="The bounty doesn't exist")
 
 
 class CreateProductRequestMutation(graphene.Mutation, InfoType):
@@ -1140,7 +1145,7 @@ class WorkMutations(graphene.ObjectType):
     change_task_priority = ChangeTaskPriorityMutation.Field()
     leave_bounty = LeaveBountyMutation.Field()
     claim_bounty = ClaimBountyMutation.Field()
-    in_review_task = InReviewTaskMutation.Field()
-    approve_task = ApproveTaskMutation.Field()
-    reject_task = RejectTaskMutation.Field()
-    request_revision_task = RequestRevisionTaskMutation.Field()
+    submit_bounty = SubmitBountyMutation.Field()
+    approve_bounty_submission = ApproveBountySubmissionMutation.Field()
+    reject_bounty_submission = RejectBountySubmissionMutation.Field()
+    request_bounty_revision = RequestBountyRevisionMutation.Field()

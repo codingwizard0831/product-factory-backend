@@ -10,7 +10,7 @@ from api.license.mutations import LicenseMutations
 from api.license.queries import LicenseQuery
 from api.work.schema import ProductQuery, InitiativeQuery, TaskQuery, CapabilityQuery, TaskCategoryQuery, ExpertiseQuery
 from api.work import WorkMutations
-from api.matching.schema import TaskClaimQuery, TaskClaimMutations, TaskDeliveryAttemptQuery
+from api.matching.schema import BountyClaimQuery, BountyClaimMutations, BountyDeliveryAttemptQuery
 from api.talent.schema import PersonQuery, ProductPersonQuery, TalentMutations, PersonProfileQuery, ReviewQuery, \
     PersonSocialQuery
 from api.pages import PagesQuery
@@ -25,7 +25,7 @@ class Query(
     TaskQuery,
     PartnerQuery,
     OrganisationPersonQuery,
-    TaskClaimQuery,
+    BountyClaimQuery,
     ProductPersonQuery,
     PersonProfileQuery,
     PersonSocialQuery,
@@ -35,7 +35,7 @@ class Query(
     LicenseQuery,
     IdeaBugQuery,
     PagesQuery,
-    TaskDeliveryAttemptQuery,
+    BountyDeliveryAttemptQuery,
     TaskCategoryQuery,
     ExpertiseQuery,
     graphene.ObjectType
@@ -46,7 +46,7 @@ class Query(
 class Mutation(
     WorkMutations,
     CommercialMutations,
-    TaskClaimMutations,
+    BountyClaimMutations,
     TalentMutations,
     CommentMutations,
     AuthMutation,
