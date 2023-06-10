@@ -1,3 +1,6 @@
+Please note, this repo is deprecated. We are moving to [https://github.com/OpenUnited/platform](https://github.com/OpenUnited/platform)
+
+
 ## Getting Started
 It is recommended that Python 3.9 is used to run the backend server. Please run the following command first to install all dependencies.
 ```
